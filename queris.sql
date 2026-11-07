@@ -71,26 +71,35 @@ SELECT nombre,email FROM clientes;
 
 no optimizada
 
+EXPLAIN (ANALYZE, BUFFERS)
 SELECT * 
 FROM productos 
 WHERE precio > 100;
 
 optimizada
 
-
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT producto_id, nombre, precio 
+FROM productos 
+WHERE precio > 100;
 
 no optimizada
 
-
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT * 
+FROM detalle_pedidos 
+WHERE pedido_id = 1;
 
 optimizada
 
-
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT producto_id, cantidad, precio_unitario 
+FROM detalle_pedidos 
+WHERE pedido_id = 1;
 
 3 limit #
 
 no optimizada
-
 
 EXPLAIN (ANALYZE, BUFFERS)
 SELECT * FROM productos;
@@ -101,11 +110,35 @@ EXPLAIN (ANALYZE, BUFFERS)
 SELECT * FROM productos
 LIMIT 100;
 
-optimizada+
+no optimizada
 
 EXPLAIN (ANALYZE, BUFFERS)
-SELECT nombre,categoria,precio,stock FROM productos
-LIMIT 100;  
+SELECT pedido_id, fecha_pedido 
+FROM pedidos 
+ORDER BY fecha_pedido DESC;
+
+optimizada
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT pedido_id, fecha_pedido 
+FROM pedidos 
+ORDER BY fecha_pedido DESC 
+LIMIT 10;
+
+no optimizada
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT producto_id, nombre, precio 
+FROM productos 
+ORDER BY producto_id;
+
+optimizada
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT producto_id, nombre, precio 
+FROM productos 
+ORDER BY producto_id 
+LIMIT 20 OFFSET 0;
 
 4 join
 
@@ -145,6 +178,22 @@ WHERE EXISTS (
     SELECT 1 FROM pedidos p WHERE p.cliente_id = c.cliente_id
 );
 
+no optimizada
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT c.nombre, co.codigo 
+FROM clientes c
+JOIN pedidos p ON c.cliente_id = p.cliente_id
+JOIN cupones co ON p.cupon_id = co.cupon_id
+WHERE p.cupon_id IS NOT NULL;
+
+optimizada
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT c.nombre, co.codigo 
+FROM clientes c
+JOIN pedidos p ON c.cliente_id = p.cliente_id AND p.cupon_id IS NOT NULL
+JOIN cupones co ON p.cupon_id = co.cupon_id;
 
 5 explain o explain plan #
 
@@ -153,6 +202,18 @@ SELECT * FROM clientes;
 
 EXPLAIN ANALYZE
 SELECT * FROM clientes;
+
+EXPLAIN 
+SELECT producto_id, SUM(cantidad) FROM detalle_pedidos GROUP BY producto_id;
+
+EXPLAIN (ANALYZE, BUFFERS) 
+SELECT producto_id, SUM(cantidad) FROM detalle_pedidos GROUP BY producto_id;
+
+EXPLAIN 
+SELECT * FROM pedidos WHERE fecha_pedido > '2026-01-01';
+
+EXPLAIN (ANALYZE, VERBOSE) 
+SELECT pedido_id, cliente_id, fecha_pedido FROM pedidos WHERE fecha_pedido > '2026-01-01';
 
 6 where + filtro
 
@@ -169,6 +230,34 @@ EXPLAIN (ANALYZE, BUFFERS)
 SELECT cliente_id, nombre, email 
 FROM clientes
 WHERE email = 'usuario@email.com';
+
+no optimizada
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT pedido_id, fecha_pedido 
+FROM pedidos 
+WHERE EXTRACT(YEAR FROM fecha_pedido) = 2026;
+
+optimizada
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT pedido_id, fecha_pedido 
+FROM pedidos 
+WHERE fecha_pedido >= '2026-01-01 00:00:00' AND fecha_pedido <= '2026-12-31 23:59:59';
+
+no optimizada
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT producto_id, nombre, precio 
+FROM productos 
+WHERE precio * 1.15 > 100;
+
+optimizada
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT producto_id, nombre, precio 
+FROM productos 
+WHERE precio > (100 / 1.15);
 
 7 exists en lugar de in #
 
@@ -188,6 +277,42 @@ WHERE EXISTS (
     SELECT 1 FROM pedidos p WHERE p.cliente_id = c.cliente_id
 );
 
+no optimizada
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT producto_id, nombre 
+FROM productos 
+WHERE producto_id IN (SELECT producto_id FROM detalle_pedidos);
+
+optimizada
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT pr.producto_id, pr.nombre 
+FROM productos pr
+WHERE EXISTS (
+    SELECT 1 
+    FROM detalle_pedidos dp 
+    WHERE dp.producto_id = pr.producto_id
+);
+
+no optimizada
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT producto_id, nombre 
+FROM productos 
+WHERE producto_id IN (SELECT producto_id FROM detalle_pedidos);
+
+optimizada
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT pr.producto_id, pr.nombre 
+FROM productos pr
+WHERE EXISTS (
+    SELECT 1 
+    FROM detalle_pedidos dp 
+    WHERE dp.producto_id = pr.producto_id
+);
+
 8 group by en lugar de distinct #
 
 no optimizada
@@ -202,6 +327,32 @@ EXPLAIN (ANALYZE, BUFFERS)
 SELECT cliente_id 
 FROM pedidos 
 GROUP BY cliente_id;
+
+no optimizada
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT DISTINCT categoria 
+FROM productos;
+
+optimizada
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT categoria 
+FROM productos 
+GROUP BY categoria;
+
+no optimizada
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT DISTINCT producto_id 
+FROM detalle_pedidos;
+
+optimizada
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT producto_id 
+FROM detalle_pedidos 
+GROUP BY producto_id;
 
 9 store procedure #
 
@@ -239,8 +390,16 @@ END;
 $$;
 
 -- Ejecución y análisis de la llamada
-EXPLAIN (ANALYZE, BUFFERS)  ??
 CALL registrar_pedido(1, 1, 2);
+
+no optimizada
+EXPLAIN (ANALYZE, BUFFERS)
+optimizada
+EXPLAIN (ANALYZE, BUFFERS)
+no optimizada
+EXPLAIN (ANALYZE, BUFFERS)
+optimizada
+EXPLAIN (ANALYZE, BUFFERS)
 
 
 10 union all en lugar de union#
@@ -258,3 +417,31 @@ EXPLAIN (ANALYZE, BUFFERS)
 SELECT cupon_id FROM cupones
 UNION ALL
 SELECT cupon_id FROM pedidos;
+
+no optimizada
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT nombre, email FROM clientes WHERE fecha_registro < '2026-03-01'
+UNION
+SELECT nombre, email FROM clientes WHERE fecha_registro >= '2026-03-01';
+
+optimizada
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT nombre, email FROM clientes WHERE fecha_registro < '2026-03-01'
+UNION ALL
+SELECT nombre, email FROM clientes WHERE fecha_registro >= '2026-03-01';
+
+no optimizada
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT cliente_id AS id_relacionado, 'Pedido Realizado' AS tipo_evento, fecha_pedido AS fecha FROM pedidos
+UNION
+SELECT cupon_id AS id_relacionado, 'Cupón Creado' AS tipo_evento, fecha_inicio AS fecha FROM cupones;
+
+optimizada
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT cliente_id AS id_relacionado, 'Pedido Realizado' AS tipo_evento, fecha_pedido AS fecha FROM pedidos
+UNION ALL
+SELECT cupon_id AS id_relacionado, 'Cupón Creado' AS tipo_evento, fecha_inicio AS fecha FROM cupones;
