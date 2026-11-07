@@ -22,6 +22,13 @@ SELECT pedido_id, cliente_id, fecha_pedido, estado
 FROM pedidos
 WHERE fecha_pedido >= '2026-01-01 00:00:00';
 
+no optimizada
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT cupon_id, porcentaje_descuento, fecha_fin
+FROM cupones
+WHERE codigo = 'DESCUENTO2026';
+
 optimizada
 
 CREATE INDEX idx_cupones_codigo_hash ON cupones USING HASH (codigo);
@@ -31,6 +38,13 @@ SELECT cupon_id, porcentaje_descuento, fecha_fin
 FROM cupones
 WHERE codigo = 'DESCUENTO2026';
 
+no optimizada
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT  nombre, precio
+FROM productos
+WHERE nombre LIKE '%Laptop%';
+
 optimizada
 
 -- Activar la extensión para patrones de texto
@@ -39,7 +53,7 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE INDEX idx_productos_nombre_gin ON productos USING GIN (nombre gin_trgm_ops);
 
 EXPLAIN (ANALYZE, BUFFERS)
-SELECT producto_id, nombre, precio
+SELECT  nombre, precio
 FROM productos
 WHERE nombre LIKE '%Laptop%';
 
@@ -54,6 +68,24 @@ optimizada
 
 EXPLAIN (ANALYZE, BUFFERS)
 SELECT nombre,email FROM clientes;
+
+no optimizada
+
+SELECT * 
+FROM productos 
+WHERE precio > 100;
+
+optimizada
+
+
+
+no optimizada
+
+
+
+optimizada
+
+
 
 3 limit #
 
