@@ -358,16 +358,13 @@ GROUP BY producto_id;
 
 no optimizada
 
--- 1. Consultar precio
 EXPLAIN (ANALYZE, BUFFERS)
 SELECT precio FROM productos WHERE producto_id = 1;
--- 2. Insertar pedido individualmente
 EXPLAIN (ANALYZE, BUFFERS)
 INSERT INTO pedidos (cliente_id, cupon_id) VALUES (1, NULL);
 
 optimizada
 
--- Creación del procedimiento almacenado
 CREATE OR REPLACE PROCEDURE registrar_pedido(
     p_cliente_id INT,
     p_producto_id INT,
@@ -383,23 +380,71 @@ BEGIN
     
     INSERT INTO pedidos (cliente_id) VALUES (p_cliente_id) 
     RETURNING pedido_id INTO v_pedido_id;
-    
-    INSERT INTO detalle_pedidos (pedido_id, producto_id, cantidad, precio_unitario)
-    VALUES (v_pedido_id, p_producto_id, p_cantidad, v_precio);
+
 END;
 $$;
 
--- Ejecución y análisis de la llamada
 CALL registrar_pedido(1, 1, 2);
 
 no optimizada
+
 EXPLAIN (ANALYZE, BUFFERS)
+UPDATE productos SET stock = stock - 1 WHERE producto_id = 10;
+EXPLAIN (ANALYZE, BUFFERS)
+UPDATE productos SET stock = stock - 2 WHERE producto_id = 12;
+
 optimizada
-EXPLAIN (ANALYZE, BUFFERS)
+
+CREATE OR REPLACE PROCEDURE descontar_stock(
+    p_producto_id INT,
+    p_cantidad INT
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    UPDATE productos 
+    SET stock = stock - p_cantidad 
+    WHERE producto_id = p_producto_id;
+END;
+$$;
+
+CALL descontar_stock(10, 1);
+
 no optimizada
+
 EXPLAIN (ANALYZE, BUFFERS)
+INSERT INTO clientes (nombre, email) VALUES ('Juan', 'juan@email.com');
+EXPLAIN (ANALYZE, BUFFERS)
+INSERT INTO productos (precio, nombre,categoria) VALUES (20, 'producto','nose');
+
 optimizada
-EXPLAIN (ANALYZE, BUFFERS)
+
+CREATE OR REPLACE PROCEDURE insertar_datos(
+    p_nombre_cliente VARCHAR,
+    p_email VARCHAR,
+    p_precio NUMERIC,
+    p_nombre_producto VARCHAR,
+    p_categoria VARCHAR
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    INSERT INTO clientes (nombre, email)
+    VALUES (p_nombre_cliente, p_email);
+
+    INSERT INTO productos (precio, nombre, categoria)
+    VALUES (p_precio, p_nombre_producto, p_categoria);
+END;
+$$;
+
+CALL insertar_datos(
+    'Juan',
+    'juan@email.com',
+    20,
+    'producto',
+    'nose'
+);
+
 
 
 10 union all en lugar de union#
@@ -445,3 +490,64 @@ EXPLAIN (ANALYZE, BUFFERS)
 SELECT cliente_id AS id_relacionado, 'Pedido Realizado' AS tipo_evento, fecha_pedido AS fecha FROM pedidos
 UNION ALL
 SELECT cupon_id AS id_relacionado, 'Cupón Creado' AS tipo_evento, fecha_inicio AS fecha FROM cupones;
+
+11 evitar el DISTINCT
+
+no optimizada
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT DISTINCT c.cliente_id, c.nombre, c.email
+FROM clientes c
+INNER JOIN pedidos p ON c.cliente_id = p.cliente_id
+WHERE p.estado = 'completado';
+
+optimizada
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT c.cliente_id, c.nombre, c.email
+FROM clientes c
+WHERE EXISTS (
+    SELECT 1 
+    FROM pedidos p 
+    WHERE p.cliente_id = c.cliente_id 
+      AND p.estado = 'completado'
+);
+
+no optimizada
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT DISTINCT 
+    pr.producto_id, 
+    pr.nombre, 
+    SUM(dp.cantidad) OVER (PARTITION BY pr.producto_id) AS total_vendido
+FROM productos pr
+INNER JOIN detalle_pedidos dp ON pr.producto_id = dp.producto_id;
+
+optimizada
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT 
+    pr.producto_id, 
+    pr.nombre, 
+    SUM(dp.cantidad) AS total_vendido
+FROM productos pr
+INNER JOIN detalle_pedidos dp ON pr.producto_id = dp.producto_id
+GROUP BY pr.producto_id, pr.nombre;
+
+no optimizada
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT DISTINCT cp.cupon_id, cp.codigo, cp.porcentaje_descuento
+FROM cupones cp
+INNER JOIN pedidos p ON cp.cupon_id = p.cupon_id;
+
+optimizada
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT cp.cupon_id, cp.codigo, cp.porcentaje_descuento
+FROM cupones cp
+WHERE cp.cupon_id IN (
+    SELECT p.cupon_id 
+    FROM pedidos p 
+    WHERE p.cupon_id IS NOT NULL
+);

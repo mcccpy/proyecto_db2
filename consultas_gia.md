@@ -15,6 +15,7 @@ Esta guía documenta los patrones más comunes para optimizar consultas SQL util
 8. [`GROUP BY` en lugar de `DISTINCT`](#8-group-by-en-lugar-de-distinct)
 9. [Procedimientos Almacenados (`STORED PROCEDURES`)](#9-procedimientos-almacenados)
 10. [`UNION ALL` en lugar de `UNION`](#10-union-all-en-lugar-de-union)
+11. [Evitar el `DISTINCT`](#11-evitar-el-distinct)
 
 ---
 
@@ -584,4 +585,91 @@ EXPLAIN (ANALYZE, BUFFERS)
 SELECT pedido_id, fecha_pedido FROM pedidos_2025
 UNION ALL
 SELECT pedido_id, fecha_pedido FROM pedidos_2026;
+```
+
+---
+
+## 11. Evitar el `DISTINCT`
+
+### Caso 11.1: Clientes con al menos un pedido completado
+
+#### ❌ No Optimizada (`JOIN` multiplica filas y `DISTINCT` fuerza un ordenamiento/hash costoso)
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT DISTINCT c.cliente_id, c.nombre, c.email
+FROM clientes c
+INNER JOIN pedidos p ON c.cliente_id = p.cliente_id
+WHERE p.estado = 'completado';
+
+```
+
+#### ⚡ Optimizada (`EXISTS` detiene la búsqueda al encontrar la primera coincidencia)
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT c.cliente_id, c.nombre, c.email
+FROM clientes c
+WHERE EXISTS (
+    SELECT 1 
+    FROM pedidos p 
+    WHERE p.cliente_id = c.cliente_id 
+      AND p.estado = 'completado'
+);
+
+```
+
+### Caso 11.2: Total de unidades vendidas por producto
+
+#### ❌ No Optimizada (`DISTINCT` elimina duplicados después de calcular la ventana sobre todas las filas)
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT DISTINCT 
+    pr.producto_id, 
+    pr.nombre, 
+    SUM(dp.cantidad) OVER (PARTITION BY pr.producto_id) AS total_vendido
+FROM productos pr
+INNER JOIN detalle_pedidos dp ON pr.producto_id = dp.producto_id;
+
+```
+
+#### ⚡ Optimizada (`GROUP BY` agrupa nativamente antes de calcular la agregación)
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT 
+    pr.producto_id, 
+    pr.nombre, 
+    SUM(dp.cantidad) AS total_vendido
+FROM productos pr
+INNER JOIN detalle_pedidos dp ON pr.producto_id = dp.producto_id
+GROUP BY pr.producto_id, pr.nombre;
+
+```
+
+### Caso 11.3: Cupones utilizados al menos una vez
+
+#### ❌ No Optimizada (`JOIN` masivo contra pedidos para luego deduplicar)
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT DISTINCT cp.cupon_id, cp.codigo, cp.porcentaje_descuento
+FROM cupones cp
+INNER JOIN pedidos p ON cp.cupon_id = p.cupon_id;
+
+```
+
+#### ⚡ Optimizada (Subconsulta con `IN` evalúa solo las llaves foráneas no nulas)
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT cp.cupon_id, cp.codigo, cp.porcentaje_descuento
+FROM cupones cp
+WHERE cp.cupon_id IN (
+    SELECT p.cupon_id 
+    FROM pedidos p 
+    WHERE p.cupon_id IS NOT NULL
+);
+
 ```
